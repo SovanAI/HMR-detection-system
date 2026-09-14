@@ -1,7 +1,7 @@
 import json
 from typing import Any, Dict
 
-from human.joint_mapping import get_joint_name
+from human.activity.joint_mapping import get_joint_name
 
 
 class HumanStateExtractor:

@@ -22,9 +22,9 @@ from __future__ import annotations
 import json
 from typing import Any, Dict
 
-from human.state_extractor import HumanStateExtractor
-from human.motion_analyzer import MotionAnalyzer
-from human.posture_analyzer import PostureAnalyzer
+from human.activity.state_extractor import HumanStateExtractor
+from human.activity.motion_analyzer import MotionAnalyzer
+from human.activity.posture_analyzer import PostureAnalyzer
 
 
 class HumanFeatureAnalyzer:

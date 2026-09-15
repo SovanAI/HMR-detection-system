@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from .camera_model import Point3D
+from human.spatial.camera_model import Point3D
 from .metric_3d import MetricObject3D
 
 

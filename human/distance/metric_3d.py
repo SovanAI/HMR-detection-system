@@ -33,7 +33,7 @@ from typing import Optional
 import math
 import numpy as np
 
-from human.camera_model import (
+from human.spatial.camera_model import (
     CameraModel,
     Point3D,
 )

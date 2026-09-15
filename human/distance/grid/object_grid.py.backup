@@ -1,0 +1,537 @@
+"""
+BAS-HMR
+Object-Centric 3D Grid
+
+Extracts a fixed-size grid of 3D points from an object's
+bounding box and a metric depth map.
+
+Pipeline:
+
+    Bounding Box
+          +
+      Depth Map
+          ↓
+       5 x 5
+      sampling
+          ↓
+    25 3D points
+          ↓
+      X, Y, Z
+
+The output remains in metres internally.
+"""
+
+from dataclasses import dataclass
+from typing import Optional
+
+import numpy as np
+
+from .depth_to_3d import (
+    DepthTo3D,
+    Point3D,
+)
+
+
+@dataclass
+class BoundingBox:
+    """2D object bounding box in pixel coordinates."""
+
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+    @property
+    def width(self) -> float:
+        return max(0.0, self.x2 - self.x1)
+
+    @property
+    def height(self) -> float:
+        return max(0.0, self.y2 - self.y1)
+
+    @property
+    def center_x(self) -> float:
+        return (self.x1 + self.x2) / 2.0
+
+    @property
+    def center_y(self) -> float:
+        return (self.y1 + self.y2) / 2.0
+
+
+@dataclass
+class GridPoint:
+    """
+    One sampled point in the object grid.
+    """
+
+    row: int
+    col: int
+
+    u: float
+    v: float
+
+    point_3d: Point3D
+
+    depth: float
+
+
+@dataclass
+class Object3DGrid:
+    """
+    Complete 3D representation of one detected object.
+    """
+
+    object_id: int
+    object_class: str
+
+    bbox: BoundingBox
+
+    grid_rows: int
+    grid_cols: int
+
+    points: list[GridPoint]
+
+    valid_ratio: float
+
+    def xyz_array(self) -> np.ndarray:
+        """
+        Return all valid XYZ points.
+
+        Shape:
+            (N, 3)
+        """
+
+        if not self.points:
+            return np.empty(
+                (0, 3),
+                dtype=np.float32,
+            )
+
+        return np.asarray(
+            [
+                point.point_3d.as_array()
+                for point in self.points
+            ],
+            dtype=np.float32,
+        )
+
+    def depth_array(self) -> np.ndarray:
+        """Return depths of all valid grid points."""
+
+        if not self.points:
+            return np.empty(
+                (0,),
+                dtype=np.float32,
+            )
+
+        return np.asarray(
+            [
+                point.depth
+                for point in self.points
+            ],
+            dtype=np.float32,
+        )
+
+
+class ObjectGridExtractor:
+    """
+    Extracts a fixed-size 3D grid from a detected object.
+    """
+
+    def __init__(
+        self,
+        depth_converter: Optional[DepthTo3D] = None,
+        rows: int = 5,
+        cols: int = 5,
+        border_ratio: float = 0.10,
+        depth_radius: int = 2,
+    ):
+        if rows < 2:
+            raise ValueError(
+                "rows must be >= 2"
+            )
+
+        if cols < 2:
+            raise ValueError(
+                "cols must be >= 2"
+            )
+
+        if not 0.0 <= border_ratio < 0.5:
+            raise ValueError(
+                "border_ratio must be between 0 and 0.5"
+            )
+
+        self.depth_converter = (
+            depth_converter
+            or DepthTo3D()
+        )
+
+        self.rows = rows
+        self.cols = cols
+        self.border_ratio = border_ratio
+        self.depth_radius = depth_radius
+
+    @staticmethod
+    def _clip_bbox(
+        bbox: BoundingBox,
+        width: int,
+        height: int,
+    ) -> BoundingBox:
+
+        return BoundingBox(
+            x1=float(
+                np.clip(
+                    bbox.x1,
+                    0,
+                    width - 1,
+                )
+            ),
+            y1=float(
+                np.clip(
+                    bbox.y1,
+                    0,
+                    height - 1,
+                )
+            ),
+            x2=float(
+                np.clip(
+                    bbox.x2,
+                    0,
+                    width - 1,
+                )
+            ),
+            y2=float(
+                np.clip(
+                    bbox.y2,
+                    0,
+                    height - 1,
+                )
+            ),
+        )
+
+    def _sample_depth(
+        self,
+        depth_map: np.ndarray,
+        u: float,
+        v: float,
+    ) -> Optional[float]:
+        """
+        Obtain a robust depth value around a pixel.
+
+        A small neighborhood is used instead of trusting
+        a single depth pixel.
+        """
+
+        height, width = depth_map.shape
+
+        x = int(round(u))
+        y = int(round(v))
+
+        x = int(
+            np.clip(
+                x,
+                0,
+                width - 1,
+            )
+        )
+
+        y = int(
+            np.clip(
+                y,
+                0,
+                height - 1,
+            )
+        )
+
+        radius = self.depth_radius
+
+        x1 = max(0, x - radius)
+        x2 = min(width, x + radius + 1)
+
+        y1 = max(0, y - radius)
+        y2 = min(height, y + radius + 1)
+
+        region = depth_map[
+            y1:y2,
+            x1:x2,
+        ]
+
+        valid = region[
+            np.isfinite(region)
+            & (
+                region
+                >= self.depth_converter.min_depth
+            )
+            & (
+                region
+                <= self.depth_converter.max_depth
+            )
+        ]
+
+        if valid.size == 0:
+            return None
+
+        # Median is more robust than a single pixel.
+        return float(
+            np.median(valid)
+        )
+
+    def extract(
+        self,
+        depth_map: np.ndarray,
+        bbox: BoundingBox,
+        object_id: int = 0,
+        object_class: str = "object",
+    ) -> Optional[Object3DGrid]:
+        """
+        Extract a 3D grid from an object's bounding box.
+
+        Parameters
+        ----------
+        depth_map:
+            2D metric depth map in metres.
+
+        bbox:
+            Object bounding box.
+
+        object_id:
+            Tracking/object identifier.
+
+        object_class:
+            Object class name.
+
+        Returns
+        -------
+        Object3DGrid or None
+        """
+
+        if depth_map.ndim != 2:
+            raise ValueError(
+                "depth_map must be 2D."
+            )
+
+        height, width = depth_map.shape
+
+        bbox = self._clip_bbox(
+            bbox,
+            width,
+            height,
+        )
+
+        if bbox.width < 2 or bbox.height < 2:
+            return None
+
+        # Ignore a small border around the bounding box.
+        # This reduces contamination from background depth.
+        margin_x = (
+            bbox.width
+            * self.border_ratio
+        )
+
+        margin_y = (
+            bbox.height
+            * self.border_ratio
+        )
+
+        left = bbox.x1 + margin_x
+        right = bbox.x2 - margin_x
+
+        top = bbox.y1 + margin_y
+        bottom = bbox.y2 - margin_y
+
+        points: list[GridPoint] = []
+
+        total_points = (
+            self.rows
+            * self.cols
+        )
+
+        for row in range(self.rows):
+
+            if self.rows == 1:
+                v = (top + bottom) / 2.0
+            else:
+                v = (
+                    top
+                    + row
+                    * (bottom - top)
+                    / (self.rows - 1)
+                )
+
+            for col in range(self.cols):
+
+                if self.cols == 1:
+                    u = (left + right) / 2.0
+                else:
+                    u = (
+                        left
+                        + col
+                        * (right - left)
+                        / (self.cols - 1)
+                    )
+
+                depth = self._sample_depth(
+                    depth_map,
+                    u,
+                    v,
+                )
+
+                if depth is None:
+                    continue
+
+                point_3d = (
+                    self.depth_converter.pixel_to_3d(
+                        u,
+                        v,
+                        depth,
+                    )
+                )
+
+                if point_3d is None:
+                    continue
+
+                points.append(
+                    GridPoint(
+                        row=row,
+                        col=col,
+                        u=float(u),
+                        v=float(v),
+                        point_3d=point_3d,
+                        depth=float(depth),
+                    )
+                )
+
+        valid_ratio = (
+            len(points) / total_points
+            if total_points > 0
+            else 0.0
+        )
+
+        if not points:
+            return None
+
+        return Object3DGrid(
+            object_id=object_id,
+            object_class=object_class,
+            bbox=bbox,
+            grid_rows=self.rows,
+            grid_cols=self.cols,
+            points=points,
+            valid_ratio=float(valid_ratio),
+        )
+
+
+if __name__ == "__main__":
+
+    print("=" * 60)
+    print("OBJECT 3D GRID SELF TEST")
+    print("=" * 60)
+
+    # ---------------------------------------------------------
+    # Synthetic depth map
+    # ---------------------------------------------------------
+
+    height = 480
+    width = 640
+
+    depth_map = np.full(
+        (height, width),
+        2.0,
+        dtype=np.float32,
+    )
+
+    # ---------------------------------------------------------
+    # Camera
+    # ---------------------------------------------------------
+
+    converter = DepthTo3D()
+
+    # ---------------------------------------------------------
+    # Object bounding box
+    # ---------------------------------------------------------
+
+    bbox = BoundingBox(
+        x1=120,
+        y1=100,
+        x2=520,
+        y2=400,
+    )
+
+    # ---------------------------------------------------------
+    # Grid extractor
+    # ---------------------------------------------------------
+
+    extractor = ObjectGridExtractor(
+        depth_converter=converter,
+        rows=5,
+        cols=5,
+        border_ratio=0.10,
+        depth_radius=2,
+    )
+
+    grid = extractor.extract(
+        depth_map=depth_map,
+        bbox=bbox,
+        object_id=1,
+        object_class="person",
+    )
+
+    assert grid is not None
+
+    print(
+        f"Object ID       : {grid.object_id}"
+    )
+
+    print(
+        f"Object class    : {grid.object_class}"
+    )
+
+    print(
+        f"Grid size       : "
+        f"{grid.grid_rows} x "
+        f"{grid.grid_cols}"
+    )
+
+    print(
+        f"Valid points    : "
+        f"{len(grid.points)}"
+    )
+
+    print(
+        f"Valid ratio     : "
+        f"{grid.valid_ratio:.2%}"
+    )
+
+    xyz = grid.xyz_array()
+
+    print(
+        f"XYZ shape       : "
+        f"{xyz.shape}"
+    )
+
+    print()
+    print("Sample 3D points:")
+
+    for point in grid.points[:5]:
+
+        print(
+            f"  ({point.u:.1f}, {point.v:.1f}) "
+            f"→ "
+            f"X={point.point_3d.x:.3f} "
+            f"Y={point.point_3d.y:.3f} "
+            f"Z={point.point_3d.z:.3f}"
+        )
+
+    # All 25 points should be valid.
+    assert len(grid.points) == 25
+
+    assert xyz.shape == (25, 3)
+
+    assert abs(
+        np.median(xyz[:, 2]) - 2.0
+    ) < 1e-6
+
+    print()
+    print(
+        "OBJECT 3D GRID SELF TEST PASSED"
+    )

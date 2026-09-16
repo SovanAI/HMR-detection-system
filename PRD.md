@@ -1,388 +1,345 @@
 # Product Requirements Document (PRD)
-## 4D-Humans: Human Body Reconstruction and Tracking System
+## BAS-HMR: Real-Time Person–Chair Distance System
 
-**Project Name:** 4D-Humans with HMR2.0  
-**Version:** 1.0  
-**Date Created:** 2026-09-09  
-**Status:** Active Development  
+**Project Name:** BAS-HMR  
+**Version:** 2.0  
+**Date Updated:** 2026-09-15  
+**Status:** Active Development / Real-time ML distance pipeline  
 
 ---
 
 ## 1. Executive Summary
 
-4D-Humans is an advanced computer vision system that reconstructs and tracks 3D human bodies from 2D images and videos. The system combines state-of-the-art transformer-based deep learning models (HMR2.0) with object detection (YOLOv11) to provide accurate human mesh recovery and temporal tracking across video sequences.
+BAS-HMR is a real-time computer vision system for estimating the distance between a person and a chair using live camera input. The current codebase is not a full HMR/SMPL mesh reconstruction system; it is a working perception pipeline that combines object detection, metric depth estimation, 3D grid feature extraction, and a trained regression model to predict spatial distance in meters.
 
-**Key Value Proposition:**
-- Automatic 3D human body reconstruction from single images
-- Real-time human tracking in video sequences
-- High accuracy mesh generation with SMPL model compatibility
-- Batch processing for scalability
-- Multi-view rendering (front and side views)
-- Exportable 3D mesh files (.obj format)
+The active implementation centers on these components:
+- OpenCV camera capture and MJPEG streaming
+- Ultralytics YOLO11n for person/chair detection
+- YOLO26n depth model for metric depth maps
+- 3D object grid extraction from depth + bounding boxes
+- Pairwise feature extraction for person–chair relations
+- A trained Ridge regression model for distance prediction
+- Flask endpoints for live visualization and telemetry
+
+**Current Product Value Proposition:**
+- Estimate person-to-chair distance in real time from a webcam
+- Support multiple people and multiple chairs in the same scene
+- Use independent trackers per object class to reduce identity confusion
+- Reuse depth maps between frames to reduce runtime cost
+- Visualize results via live MJPEG and JSON status APIs
 
 ---
 
 ## 2. Problem Statement
 
-### Current Challenges:
-- **Manual 3D Modeling:** Traditional 3D body modeling requires manual labor and expertise, making it time-consuming and expensive
-- **Limited Real-time Tracking:** Existing solutions struggle with tracking multiple humans across video sequences
-- **Accuracy Issues:** Many systems fail to accurately capture human body shape and pose from single images
-- **Integration Complexity:** Difficulty in integrating pose estimation with tracking systems
-- **Scalability:** Processing large volumes of images/videos requires significant computational resources
+### Current Need
+The project addresses a practical sensing task: understanding spatial relationship between a person and nearby seating objects in a live or recorded scene. This is useful for safety, room awareness, interaction analysis, and assistive monitoring.
 
-### Target Use Cases:
-1. **Sports Analytics:** Analyzing athlete performance and motion
-2. **Healthcare/Biomechanics:** Movement analysis for rehabilitation and research
-3. **Entertainment/Gaming:** Motion capture for animation and virtual reality
-4. **Surveillance:** Human tracking and behavior analysis
-5. **Fitness Applications:** Workout form analysis and feedback
+### Challenges in the Current Implementation
+- Person and chair detection must be class-specific and robust to overlaps
+- Depth estimation is imperfect and must be filtered and validated
+- 3D object features are more reliable than raw 2D boxes for distance estimation
+- Real-time processing must keep camera stream stable without stalling on slow inference
+- Multiple objects must be tracked independently without cross-class identity leakage
+
+### Target Use Cases
+1. Human-object proximity monitoring in room-scale scenes
+2. Chair occupancy or person-seat distance analysis
+3. Real-time validation of spatial interaction metrics
+4. Dataset collection for ML distance model training
+5. Live camera demos and debugging of distance estimation behavior
 
 ---
 
 ## 3. Goals and Objectives
 
-### Primary Goals:
-1. **Accuracy:** Achieve state-of-the-art 3D human body reconstruction with high mesh accuracy
-2. **Performance:** Enable real-time or near-real-time processing of video sequences
-3. **Usability:** Provide simple CLI and API interfaces for various use cases
-4. **Scalability:** Support batch processing for large-scale applications
-5. **Accessibility:** Automatic model/checkpoint downloads for easy setup
+### Primary Goals
+1. Estimate person–chair distance from live camera input with acceptable real-time latency
+2. Use a robust detection + depth + feature pipeline instead of relying on raw pixel distance alone
+3. Support multiple objects while keeping per-class tracking independent
+4. Make the system observable through a browser-friendly MJPEG stream and status endpoints
+5. Train and deploy a compact regression model suitable for lightweight inference
 
-### Success Metrics:
-- Reconstruction accuracy measured against benchmark datasets (H36M, 3DPW, LSP-Extended)
-- Processing speed (FPS) for real-time applications
-- Successful tracking consistency across video frames
-- User adoption and integration success
-- System reliability and uptime
-
----
-
-## 4. Features and Functionality
-
-### 4.1 Core Features
-
-#### A. Image-Based Human Reconstruction
-- **Input:** Single or batch images
-- **Output:** 3D SMPL mesh with pose and shape parameters
-- **Processing:** 
-  - Automatic human detection using YOLOv11
-  - Pose estimation using ViTDet (Vision Transformer Detection)
-  - HMR2.0 model for mesh generation
-- **Batch Processing:** Support for configurable batch sizes (tested up to 48 images)
-- **Visualization Options:**
-  - Front-view rendering
-  - Side-view rendering
-  - Full-frame multi-person rendering
-  - 3D mesh export (.obj format)
-
-#### B. Video-Based Human Tracking
-- **Input:** Video files, image sequences, or YouTube links
-- **Output:** 
-  - Video renderings with tracked human meshes
-  - Tracklet data (pickle format) with 3D pose/shape per frame
-  - Temporal consistency across frames
-- **Features:**
-  - Multi-person tracking
-  - Identity preservation across frames
-  - Smooth temporal tracking using PHALP framework
-  - Per-frame pose and shape estimation
-
-#### C. Training and Evaluation
-- **Training:** 
-  - Support for multiple datasets (mixed training data)
-  - Configurable training pipelines via Hydra
-  - Distributed training on multi-GPU setups (tested on 8x A100)
-  - Checkpoint management and logging
-- **Evaluation:**
-  - Multi-dataset benchmarking (H36M, 3DPW, LSP-Extended, COCO, PoseTrack)
-  - Quantitative metrics (PCK accuracy, etc.)
-  - Comprehensive evaluation reports
-
-#### D. Model Management
-- **Automatic Downloads:** Pre-trained checkpoints automatically downloaded to `$HOME/.cache/4DHumans`
-- **Multiple Variants:**
-  - HMR2.0b (latest/default)
-  - HMR2.0a (alternative version)
-- **SMPL Model Support:** Compatible with neutral SMPL model for 3D body representation
-
-### 4.2 Secondary Features
-- **Visualization Tools:**
-  - Skeleton rendering
-  - OpenPose-style rendering
-  - Mesh texture support
-  - Interactive 3D visualization
-- **Data Preprocessing:**
-  - LSP Extended dataset conversion
-  - PoseTrack dataset conversion
-  - Custom data pipeline support
-- **API and CLI:**
-  - Command-line interface for all major functions
-  - Python API for programmatic access
-  - Gradio web interface for easy use
+### Success Criteria
+- Live detection runs for person class 0 and chair class 56 only
+- Distances are estimated in metric units from 3D object geometry
+- Multiple detections are tracked without swapping person and chair identities
+- The system continues functioning even when a depth or grid frame fails
+- Output is accessible through both live visualization and structured API responses
 
 ---
 
-## 5. Technical Requirements
+## 4. Actual Technical Stack
 
-### 5.1 System Requirements
-- **Compute:** GPU required (tested on A100, supports CUDA 11.6+)
-- **Memory:** Minimum 8GB VRAM for inference, 16GB+ for training
-- **Storage:** ~10GB for models and data cache
-- **OS:** Linux (primary), partial Windows/Mac support
+### 4.1 Core Runtime
+- Python 3.11.11
+- OpenCV for camera acquisition, frame processing, and MJPEG output
+- Flask for live web UI and status API
+- NumPy for array processing and feature math
+- joblib for loading the trained regression artifact
+- scikit-learn Ridge regression model for final distance prediction
 
-### 5.2 Dependencies
-- **Core:**
-  - PyTorch 1.13.1+
-  - PyTorch-Lightning 1.8.1+
-  - CUDA 11.6+
-- **Detection:** YOLOv11 model
-- **Tracking:** PHALP framework
-- **Visualization:** OpenCV, PyOpenGL
-- **Data Processing:** NumPy, Pillow, Scipy
-- **Configuration:** Hydra (for training)
+### 4.2 Detection and Depth Models
+- Ultralytics YOLO11n
+  - Used for person and chair detection
+  - Restricted explicitly to COCO classes: person = 0, chair = 56
+- Ultralytics YOLO26n-depth
+  - Used for metric depth estimation from the input frame
+  - Depth is reused between depth-refresh frames to maintain stability
 
-### 5.3 Model Architecture
-- **Backbone:** Vision Transformer (ViT) for feature extraction
-- **Head:** SMPL head for predicting pose, shape, and camera parameters
-- **Transformer Modules:** 
-  - Pose transformer for refining pose predictions
-  - Conditional MLP for shape prediction
-- **Components:**
-  - Human detection: ViTDet/Cascade Mask R-CNN
-  - Pose estimation: ViTPose
-  - Mesh generation: HMR2.0
+### 4.3 3D Spatial Pipeline
+- Camera intrinsics defined in a custom `CameraIntrinsics` structure
+- `DepthTo3D` converts depth map values into 3D points
+- `ObjectGridExtractor` builds a 5x5 grid over each detected object region
+- `FeatureExtractor` computes per-object 3D statistics
+- `PairFeatureExtractor` creates the final person–chair relationship vector
+  - 34 feature order is treated as a contract for the distance model
 
-### 5.4 Data Specifications
-- **Input Formats:**
-  - Images: JPG, PNG, etc.
-  - Videos: MP4, AVI, or image sequences
-  - URLs: YouTube links for direct processing
-- **Output Formats:**
-  - Rendered images/videos: MP4, PNG
-  - Mesh: OBJ format
-  - Tracklets: Pickle (.pkl) format
-  - Metadata: NPZ (NumPy compressed arrays)
+### 4.4 Tracking and Smoothing
+- `SimpleTracker` implements independent class-specific matching
+- Per-class maximum center distance and missing-frame thresholds are configured
+- Temporal smoothing is applied via EMA / rolling window logic before final output
+
+### 4.5 Current Data and Model Artifacts
+- Detection model: `yolo11n.pt`
+- Depth model: `yolo26n-depth.pt`
+- Regression model: `training/distance/models/best_distance_model.joblib`
+- Output is displayed in a browser UI and also exposed through JSON endpoints
 
 ---
 
-## 6. Use Case Scenarios
+## 5. Current System Architecture
 
-### Use Case 1: Sports Performance Analysis
-**User:** Sports coach analyzing athlete movement  
-**Flow:**
-1. Capture video of athlete performing
-2. Run `track.py` on video
-3. Extract pose and shape parameters
-4. Analyze movement patterns and biomechanics
+### Runtime Flow
+1. Camera capture starts with OpenCV and a fixed resolution such as 640x480
+2. YOLO11n detects only person and chair instances
+3. Separate trackers maintain identity per class
+4. A depth pass runs on a configured interval and refreshes the latest depth map
+5. Bounding boxes are converted into local 3D object grids
+6. Person and chair features are combined into a pairwise vector
+7. The trained Ridge model predicts the metric distance
+8. Temporal smoothing stabilizes the final value
+9. The result is drawn on-frame and streamed to the web UI
 
-### Use Case 2: Fitness Form Correction
-**User:** Fitness app providing real-time feedback  
-**Flow:**
-1. Process image from user's camera
-2. Run `demo.py` on image
-3. Compare pose against reference (ideal form)
-4. Provide feedback on form correction
+### Important Implementation Principles
+- YOLO11n is intentionally restricted to classes 0 and 56
+- Person and chair tracking are independent, not shared
+- Detections are drawn before depth/ML logic runs
+- Grid extraction is performed from depth map + bounding box, not from raw dictionaries
+- Failed depth or grid frames do not silently remove detections
+- The latest valid depth map is reused between refresh intervals
 
-### Use Case 3: Motion Capture for Animation
-**User:** Animator or game developer  
-**Flow:**
-1. Capture reference motion video
-2. Run tracking to extract motion
-3. Export mesh data
-4. Import into animation software
+---
 
-### Use Case 4: Research and Evaluation
-**User:** Researcher evaluating model performance  
-**Flow:**
-1. Prepare evaluation dataset
-2. Run `eval.py` with multiple datasets
-3. Generate performance metrics
-4. Compare against baselines
+## 6. Current Features and Behavior
+
+### 6.1 Live Camera Processing
+- The system supports live webcam input from a local camera source
+- The processing loop captures frames at a fixed FPS target
+- It handles multiple persons and chairs simultaneously
+- Results are rendered on-screen with labels and overlays
+
+### 6.2 Detection and Tracking
+- Object classes are filtered to person and chair only
+- `SimpleTracker` creates per-class identity assignments
+- ID continuity is maintained using center-distance matching with a missing-frame allowance
+- Detection and model stages are intentionally decoupled from tracking logic
+
+### 6.3 Depth and 3D Geometry
+- Metric depth is inferred from YOLO26n-depth output
+- Depth map values are converted into 3D coordinates using camera intrinsics
+- `Object3DGrid` stores the object’s spatial structure in a 5x5 grid layout
+- Depth validity and sampling radius are used to reduce noise and outliers
+
+### 6.4 ML Distance Estimation
+- The final prediction uses a regressor trained on pairwise object features
+- The feature vector contains person geometry, chair geometry, relative motion, depth relationships, and object distances
+- The model is persisted as a joblib artifact and loaded at runtime
+
+### 6.5 Visualization and API
+- Live MJPEG stream is served through Flask
+- A JSON status endpoint exposes runtime metadata
+- The system is designed for local web inspection and iterative validation
 
 ---
 
 ## 7. Functional Requirements
 
-### FR1: Image Processing
-- The system SHALL accept single or multiple images as input
-- The system SHALL automatically detect humans using YOLOv11
-- The system SHALL generate 3D mesh for each detected person
-- The system SHALL support batch processing with configurable batch sizes
+### FR1: Camera Input
+- The system SHALL accept live video streams from a local camera source
+- The system SHALL support configurable capture width, height, and FPS
+- The system SHALL allow a clean fallback when camera initialization fails
 
-### FR2: Video Processing
-- The system SHALL accept video files, image sequences, or URLs as input
-- The system SHALL track humans across frames maintaining identity
-- The system SHALL output rendered video with tracked meshes
-- The system SHALL export tracklet data with per-frame pose/shape
+### FR2: Object Detection
+- The system SHALL detect only person and chair classes in the active pipeline
+- The system SHALL reject non-target classes before feature extraction
+- The system SHALL support multiple detections in a single frame
 
-### FR3: Mesh Export
-- The system SHALL export 3D meshes in OBJ format
-- The system SHALL support texture mapping for realistic rendering
-- The system SHALL preserve SMPL parameters for model compatibility
+### FR3: Tracking
+- The system SHALL maintain independent trackers for person and chair objects
+- The system SHALL avoid cross-class matching between person and chair tracks
+- The system SHALL preserve track continuity across short missing-frame gaps
 
-### FR4: Training
-- The system SHALL support distributed training on multiple GPUs
-- The system SHALL provide checkpoint management and resumption
-- The system SHALL log training metrics and validation results
-- The system SHALL support mixed dataset training
+### FR4: Metric Depth
+- The system SHALL compute or refresh a depth map on an interval
+- The system SHALL reuse the latest valid depth map when a refresh frame fails
+- The system SHALL clamp invalid or out-of-range depth values before conversion
 
-### FR5: Evaluation
-- The system SHALL evaluate on standard benchmarks (H36M, 3DPW, etc.)
-- The system SHALL compute quantitative metrics (PCK, MPJPE, etc.)
-- The system SHALL generate evaluation reports
+### FR5: 3D Feature Generation
+- The system SHALL convert detected bounding boxes into 3D spatial object grids
+- The system SHALL calculate object-level 3D statistics for each instance
+- The system SHALL produce a person–chair pair feature vector for regression
+
+### FR6: Distance Prediction
+- The system SHALL predict the distance between a matched person and chair in meters
+- The system SHALL use the trained release model artifact when available
+- The system SHALL apply temporal smoothing to reduce jitter in final estimates
+
+### FR7: Visualization and Monitoring
+- The system SHALL overlay detections, tracked IDs, and distance readouts on live frames
+- The system SHALL stream the live output as MJPEG over HTTP
+- The system SHALL expose runtime status and telemetry through JSON endpoints
 
 ---
 
 ## 8. Non-Functional Requirements
 
 ### NFR1: Performance
-- **Inference Speed:** Target <100ms per image on A100 GPU at batch size 48
-- **Video Processing:** Target >30 FPS for video tracking
-- **Memory:** <8GB VRAM usage for inference
+- Real-time webcam processing is required for interactive use
+- The pipeline must avoid blocking the video stream while depth or ML inference runs
+- Depth refresh should be throttled rather than run on every frame without need
 
 ### NFR2: Reliability
-- **Model Availability:** Pre-trained models automatically downloaded on first run
-- **Error Handling:** Graceful handling of invalid inputs with informative error messages
-- **Checkpointing:** Automatic checkpoint saving during training
+- Missing depth or feature frames must not remove detections from the current scene
+- Inference must continue gracefully if a single frame fails validation
+- The system must log or surface explicit errors when models are missing or invalid
 
 ### NFR3: Usability
-- **Documentation:** Comprehensive README and inline code documentation
-- **API Design:** Clear, intuitive Python API and CLI
-- **Examples:** Multiple example scripts (demo.py, track.py, etc.)
+- Local live viewing should be available without complex manual setup
+- Model files and config values should be explicit and easy to change
+- Visual output should be understandable during debugging and demos
 
 ### NFR4: Maintainability
-- **Code Quality:** Well-structured, modular codebase
-- **Testing:** Evaluation on multiple datasets for regression detection
-- **Version Control:** Git-based version management with clear commit history
+- Model logic is modularized across detection, depth, grid extraction, and regression stages
+- Feature contract order is fixed across `PairFeatureExtractor.feature_names()` and the exported model
+- Code structure supports iterative improvement without rewriting the whole pipeline
 
 ### NFR5: Scalability
-- **Distributed Computing:** Support for multi-GPU training with DDP
-- **Batch Processing:** Configurable batch sizes for different hardware
-- **Memory Efficiency:** Gradient checkpointing and mixed precision support
+- The current architecture supports multiple objects per frame
+- The system can be extended to additional object classes or new feature sets
+- The design is suitable for dataset collection and regression retraining loops
 
 ---
 
 ## 9. Constraints and Assumptions
 
 ### Constraints
-1. **GPU Requirement:** System requires NVIDIA GPU with CUDA support (no CPU-only mode)
-2. **SMPL License:** Users must download SMPL model separately due to licensing
-3. **Internet:** Model downloads require internet connectivity
-4. **Python Version:** Requires Python 3.10+ for compatibility
+1. The active implementation is built around a local webcam pipeline, not a distributed cloud service
+2. The product currently targets person and chair objects only
+3. The pipeline depends on the presence of the YOLO model weights and the trained distance model
+4. The system is primarily designed for local experimentation and deployment in a research or lab environment
+5. Python 3.11 is the effective runtime in this repository
 
 ### Assumptions
-1. Users have basic familiarity with Python and command-line tools
-2. GPU with sufficient VRAM (8GB+) available for target applications
-3. Input images contain visible human bodies from reasonable viewpoints
-4. Videos have frame rate suitable for human motion (24+ FPS)
-5. CUDA 11.6+ and PyTorch are properly installed
+1. The camera is calibrated well enough for the current intrinsics and depth conversion pipeline
+2. The object detector is adequate for common indoor person/chair scenes
+3. Depth estimation is used as a supporting signal, not as the sole source of truth
+4. The trained regression model is periodically retrained with measured ground-truth distances
+5. Users are comfortable with a local Python-based ML workflow and Flask web debugging interface
 
 ---
 
-## 10. Out of Scope
+## 10. Current Scope vs. Out of Scope
 
-The following features are NOT included in this PRD:
+### In Scope
+- Live person and chair detection
+- Person–chair distance estimation in metric units
+- Independent tracking by object class
+- Depth + 3D feature pipeline
+- MJPEG visualization and JSON status endpoints
+- Model retraining and feature refinement workflows
 
-1. **Real-time webcam processing** (future enhancement)
-2. **Mobile deployment** (requires model compression)
-3. **Multi-body non-human tracking** (humans only)
-4. **Clothing/accessory reconstruction** (SMPL body model only)
-5. **Face/hand detailed reconstruction** (whole body focus)
-6. **Support for extreme poses** (model trained on typical human poses)
-7. **Cross-camera multi-view tracking** (single camera tracking)
-
----
-
-## 11. Development Roadmap
-
-### Phase 1: Foundation (Current)
-- [x] Core image-based reconstruction (demo.py)
-- [x] Video tracking (track.py)
-- [x] Model training pipeline
-- [x] Evaluation framework
-- [x] Documentation and examples
-
-### Phase 2: Enhancement (Q4 2026)
-- [ ] Real-time webcam processing
-- [ ] Web-based Gradio interface improvements
-- [ ] Additional output formats (FBX, GLTF)
-- [ ] Performance optimization
-- [ ] Docker containerization
-
-### Phase 3: Expansion (Q1 2027)
-- [ ] Mobile model variants
-- [ ] Inference optimization (TensorRT, ONNX)
-- [ ] Multi-camera tracking
-- [ ] Advanced visualization tools
-- [ ] Commercial API service
-
-### Phase 4: Research (Ongoing)
-- [ ] Improved hand/face reconstruction
-- [ ] Clothing and accessory modeling
-- [ ] Extreme pose handling
-- [ ] Real-time training techniques
+### Out of Scope
+- Full-body SMPL mesh reconstruction from HMR2.0
+- Precision motion-capture production pipeline
+- Multi-camera tracking across rooms or environments
+- General-purpose 3D scene reconstruction
+- Commercial API or cloud deployment at this stage
+- Full 4D human reconstruction workflow as the primary product goal
 
 ---
 
-## 12. Success Criteria
+## 11. Roadmap
 
-**The project is considered successful when:**
+### Phase 1: Stability and Validation (Current)
+- [x] YOLO11n person/chair detection
+- [x] Independent class-specific tracking
+- [x] YOLO26n depth integration
+- [x] 3D object grid and feature extraction
+- [x] Ridge model inference path
+- [x] Flask MJPEG + API output
 
-1. ✓ **Accuracy:** Achieves state-of-the-art performance on H36M, 3DPW, LSP-Extended benchmarks
-2. ✓ **Performance:** Processes images at >10 FPS and videos at real-time speeds (30+ FPS)
-3. ✓ **Usability:** Simple CLI with <5 command variants covers 80% of use cases
-4. ✓ **Integration:** Successfully integrated with downstream applications (tracking, animation, sports analysis)
-5. ✓ **Adoption:** Used in research papers and practical applications
-6. ✓ **Reliability:** <1% failure rate on clean input data
-7. ✓ **Maintenance:** <1 month response time for bug fixes and feature requests
+### Phase 2: Reliability and Calibration (Next)
+- [ ] Improve depth filtering and invalid-frame handling
+- [ ] Standardize calibration and metadata for camera intrinsics
+- [ ] Add robust evaluation for distance accuracy over real dataset samples
+- [ ] Reduce runtime jitter via stronger temporal smoothing and filtering
+
+### Phase 3: Model Quality and Dataset Maturity
+- [ ] Expand dataset coverage for more indoor layouts and edge cases
+- [ ] Retrain the regression model on more validated ground-truth distances
+- [ ] Test multi-object performance in crowded scenes
+- [ ] Add metrics and reporting for distance error and failure modes
+
+### Phase 4: Future Extensions
+- [ ] Add additional object classes beyond chair/person if needed
+- [ ] Explore more advanced regression or deep-learning distance models
+- [ ] Improve UI and telemetry for monitoring during live sessions
+- [ ] Consider integration with other human-scene understanding tasks
+
+---
+
+## 12. Success Metrics
+
+The project is considered successful when:
+
+1. Person and chair detections remain stable in live video for the intended use cases
+2. Distance prediction stays within acceptable error bounds for the target indoor environment
+3. Multiple objects can be tracked in the same frame without class confusion
+4. Output remains usable in a live browser interface without crashing or stalling the stream
+5. Feature and model pipelines are reproducible enough to support retraining and validation
 
 ---
 
 ## 13. Testing and Quality Assurance
 
-### Testing Strategy
-- **Unit Testing:** Core module functionality
-- **Integration Testing:** End-to-end pipeline testing
-- **Benchmark Testing:** Performance evaluation on standard datasets
-- **Regression Testing:** Evaluation after model updates
-- **User Acceptance Testing:** Community feedback and real-world usage
+### Current Validation Strategy
+- Live camera testing with real frame streams
+- Manual validation of object IDs and class filtering
+- Feature-vector contract checks between extractor and model
+- Error handling for invalid depth or incomplete frame data
+- End-to-end inspection of webcam overlays and API responses
 
-### Quality Metrics
-- Model accuracy (PCK, MPJPE, PA-MPJPE)
-- Processing speed (FPS)
-- Memory usage
-- Error rate on edge cases
-- Code coverage (target >70%)
+### Quality Measures
+- Detection stability by class
+- Temporal consistency of tracked object IDs
+- Camera-frame continuity during live use
+- Correctness of 3D grid and feature extraction outputs
+- Regression model robustness on measured distance samples
 
 ---
 
-## 14. Appendices
+## 14. Glossary
 
-### A. Terminology
-- **HMR:** Human Mesh Recovery
-- **SMPL:** Skinned Multi-Person Linear Model
-- **ViTDet:** Vision Transformer Detection
-- **PHALP:** Pose and Shape Tracking with HMR
-- **PCK:** Percentage of Correct Keypoints
-- **MPJPE:** Mean Per Joint Position Error
-
-### B. References
-- [Paper: Humans in 4D: Reconstructing and Tracking Humans with Transformers](https://arxiv.org/pdf/2305.20091.pdf)
-- [Project Website](https://shubham-goel.github.io/4dhumans/)
-- [GitHub Repository](https://github.com/shubham-goel/4D-Humans)
-- [Hugging Face Spaces Demo](https://huggingface.co/spaces/brjathu/HMR2.0)
-
-### C. Related Projects
-- ProHMR
-- SPIN
-- SMPLify-X
-- ViTPose
-- Detectron2
-- PHALP
+- **YOLO11n:** Object detector used for person and chair recognition
+- **YOLO26n-depth:** Metric depth estimation model
+- **Object3DGrid:** Spatial 3D representation of an object region
+- **PairFeatureExtractor:** Creates a person–chair spatial feature vector
+- **Ridge model:** Lightweight regression model used for final distance estimation
+- **MJPEG:** Live streaming format used for webcam visualization
 
 ---
 
 **Document Owner:** Development Team  
-**Last Updated:** 2026-09-09  
-**Next Review Date:** 2026-12-09
+**Last Updated:** 2026-09-15  
+**Next Review Date:** 2026-12-15

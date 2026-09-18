@@ -92,3 +92,6 @@ data/
 
 # JSON files
 *.json
+
+#csv files
+*.csv
